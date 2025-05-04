@@ -25,7 +25,14 @@ with open('api_key', "r") as file:
 rf = roboflow.Roboflow(api_key)
 
 # substituir nome do workspace e do projeto
-project = rf.workspace("dcarneiro").project("foe-bot")
+project = rf.workspace("estg-e1qbq").project("supertuxkart")
 # se versão do dataset > 1, substituir pela versão correspondente
-dataset = project.version(2).download("yolov8")
+dataset = project.version(3).download("yolov8")
 # WARN: necessário verificar os paths no ficheiro data.yaml, após este ser descarregado
+
+# treinar o modelo
+# lista de modelos pre-treinados disponível em https://docs.ultralytics.com/models/yolov8/#performance-metrics
+model = YOLO("yolov8s.pt")  # carregar o modelo pre-treinado que se descarregou
+
+# Treinar o modelo
+results = model.train(data='SuperTuxKart-3/data.yaml', epochs=100, imgsz=640, device='cpu')  # intel/window
