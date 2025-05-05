@@ -1,75 +1,94 @@
-from IPython import display
-display.clear_output()
-
-import cv2
+import time
 import os
-import matplotlib.pyplot as plt
-import matplotlib.image as mpimg
-
-import roboflow
-
-import ultralytics
-from ultralytics import YOLO
-ultralytics.checks()
-
-import mss
 import cv2
 import numpy as np
-import time
+import mss
 import pyautogui
+from ultralytics import YOLO
 
-# Carregar o modelo
+# Mapeamento de teclas
+CONTROLS = {
+    'left': 'left',
+    'right': 'right',
+    'accelerate': 'up',
+    'brake': 'down',
+    'power_up': 'space',
+    'nitro': 'n',
+}
+
+# Carregar o modelo treinado
 model = YOLO("runs/detect/train2/weights/best.pt")
 
+# Obter dimensões da tela
 screen_width, screen_height = pyautogui.size()
 
-# função que captura o ecrã e devolve a imagem
+# Função para capturar a tela
 def capture_screen():
     with mss.mss() as sct:
-        screenshot = sct.grab(sct.monitors[1])  # Capturar do monitor principal
-        img = np.array(screenshot)  # Converter em imagem
-        img = cv2.cvtColor(img, cv2.COLOR_BGRA2BGR) # Converter BGRA para RGB
+        screenshot = sct.grab(sct.monitors[1])  # Captura do monitor principal
+        img = np.array(screenshot)
+        img = cv2.cvtColor(img, cv2.COLOR_BGRA2BGR)
         img_height, img_width, _ = img.shape
+        return img, img_width, img_height
 
-        # Opcionalmente, guardar a imagem capturada
-        # timestamp = time.strftime("%Y%m%d-%H%M%S-%f")  # Include microseconds
-        # img_path = os.path.join('captured_images', f"capture_{timestamp}.jpg")
-        # cv2.imwrite(img_path, img)
+# Função para controlar o kart
+def control_kart(action, duration=0.1):
+    pyautogui.keyDown(CONTROLS[action])
+    time.sleep(duration)
+    pyautogui.keyUp(CONTROLS[action])
 
-        return img, timestamp, img_width, img_height
+# Início do loop principal
+print("🎮 Iniciando controle automático do SuperTuxKart...")
+pyautogui.keyDown(CONTROLS['accelerate'])  # Aceleração constante
 
-while True:
-    img, timestamp, img_width, img_height = capture_screen()
- 
-    #results = model.predict(source=img, save=True, save_txt=True, conf=0.1) 
-    results = model(img)
+try:
+    while True:
+        img, img_width, img_height = capture_screen()
+        results = model(img)
 
-    # Extract detections (bounding boxes)
-    detections = results[0].boxes.xyxy  # Bounding boxes (x1, y1, x2, y2)
+        # Verificar se há detecções
+        if results and results[0].boxes:
+            for detection in results[0].boxes:
+                cls_id = int(detection.cls)
+                cls_name = model.names[cls_id]
+                x1, y1, x2, y2 = detection.xyxy[0]
+                x_center = (x1 + x2) / 2
 
-    if len(detections) > 0:
-        print(f"Detetou {len(detections)} objetos.")
+                if cls_name == 'enemy_kart':
+                    # Desviar do kart inimigo
+                    if x_center < img_width / 2:
+                        control_kart('left', 0.2)
+                    else:
+                        control_kart('right', 0.2)
 
-        # Opcionalmente, guardar imagem com as deteções
-        annotated_frame = results[0].plot()  # Draw bounding boxes on the image
-        result_path = os.path.join('detections', f"result_{timestamp}.jpg")
-        cv2.imwrite(result_path, annotated_frame)
+                elif cls_name == 'power_up':
+                    # Alinhar o kart com o power-up
+                    if x_center < img_width / 2 - 50:
+                        control_kart('left', 0.1)
+                    elif x_center > img_width / 2 + 50:
+                        control_kart('right', 0.1)
 
-        for i, (x1, y1, x2, y2) in enumerate(detections.tolist()):
-            # Calculate the center of the object
-            center_x = int((x1 + x2) / 2)
-            center_y = int((y1 + y2) / 2)
+                elif cls_name == 'bonus':
+                    # Alinhar o kart com o bónus
+                    if x_center < img_width / 2 - 50:
+                        control_kart('left', 0.1)
+                    elif x_center > img_width / 2 + 50:
+                        control_kart('right', 0.1)
+                    else:
+                        control_kart('power_up')
 
-            # converter coordenadas
-            scaled_x = int((center_x / img_width) * screen_width)
-            scaled_y = int((center_y / img_height) * screen_height)
+                elif cls_name == 'nitro':
+                    # Alinhar o kart com o nitro
+                    if x_center < img_width / 2 - 50:
+                        control_kart('left', 0.1)
+                    elif x_center > img_width / 2 + 50:
+                        control_kart('right', 0.1)
+                    else:
+                        control_kart('nitro')
 
-            # mover o rato
-            pyautogui.moveTo(scaled_x, scaled_y, duration=0.3)
-            pyautogui.click()
-            print(f"Moved to object {i+1} at ({scaled_x}, {scaled_y})")
+        time.sleep(0.05)  # Reduzir o delay para melhor responsividade
 
-            # Pausa breve, entre objetos
-            time.sleep(0.25)  # Adjust delay as needed
-
-    time.sleep(3)
+except KeyboardInterrupt:
+    print("🚨 Interrompido pelo usuário.")
+    pyautogui.keyUp(CONTROLS['accelerate'])  # Liberar a tecla de aceleração
+print("🏁 Controle automático encerrado.")

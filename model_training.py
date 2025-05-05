@@ -5,6 +5,8 @@ import cv2
 import os
 import matplotlib.pyplot as plt
 import matplotlib.image as mpimg
+from dotenv import load_dotenv
+
 
 import roboflow
 
@@ -19,13 +21,13 @@ ultralytics.checks()
 roboflow.login()
 
 # criar um ficheiro com a key da api do roboflow, ou simplesmente substituir abaixo
-with open('api_key', "r") as file:
-    api_key = file.read().strip() 
+load_dotenv()  # Carrega as variáveis do .env
+api_key = os.getenv("ROBOFLOW_API_KEY")  # Lê a chave da API do ambiente
 
 rf = roboflow.Roboflow(api_key)
 
 # substituir nome do workspace e do projeto
-project = rf.workspace("dcarneiro").project("foe-bot")
+project = rf.workspace("supertuxkartluis").project("super_tux_kart_project_luis")
 # se versão do dataset > 1, substituir pela versão correspondente
-dataset = project.version(2).download("yolov8")
+dataset = project.version(1).download("yolov8")
 # WARN: necessário verificar os paths no ficheiro data.yaml, após este ser descarregado
