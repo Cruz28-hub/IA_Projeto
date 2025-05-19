@@ -24,7 +24,7 @@ ROAD_CENTER_WEIGHT = 0.7
 FORWARD_INTERVAL = 0.8
 FORWARD_HOLD_TIME = 0.7
 
-# Helper function
+# Helper: screen capture
 def capture_screen():
     with mss.mss() as sct:
         screenshot = sct.grab(sct.monitors[1])
@@ -33,15 +33,34 @@ def capture_screen():
         img = cv2.resize(img, (640, 480))
         return img, img.shape[1], img.shape[0]
 
+# Helper: calculate steering duration
 def calculate_turn_duration(distance, img_width):
     normalized_dist = min(1.0, distance / img_width)
     return MIN_TURN_DURATION + (MAX_TURN_DURATION - MIN_TURN_DURATION) * normalized_dist
 
+# Key press tracking
+pressed_keys = set()
+
+def press_key(key):
+    if key not in pressed_keys:
+        pyautogui.keyDown(key)
+        pressed_keys.add(key)
+
+def release_key(key):
+    if key in pressed_keys:
+        pyautogui.keyUp(key)
+        pressed_keys.remove(key)
+
 print("[INFO] Starting real-time inference. Press Ctrl+C to stop.")
 
-last_forward_time = time.time()
+# Key timing
+last_forward_time = 0
+forward_end_time = 0
+turn_end_time = 0
+current_turn_key = None
 
 while True:
+    now = time.time()
     img, img_width, img_height = capture_screen()
     results = model(img, conf=0.35)
 
@@ -67,6 +86,7 @@ while True:
     if not own_car_x_center:
         continue
 
+    # Compute desired target X
     target_x = None
     if road_centers:
         road_center = np.mean(road_centers)
@@ -79,26 +99,32 @@ while True:
                 target_x = (ROAD_CENTER_WEIGHT * road_center +
                             (1 - ROAD_CENTER_WEIGHT) * (obstacle_center + avoid_dir * img_width * 0.3))
 
-    # Steering
+    # --- Steering logic ---
     if target_x:
         dist = abs(own_car_x_center - target_x)
-        if dist > TURN_DISTANCE * img_width:
-            turn_key = 'left' if target_x < own_car_x_center else 'right'
+        if dist > TURN_DISTANCE * img_width and current_turn_key is None:
+            current_turn_key = 'left' if target_x < own_car_x_center else 'right'
             duration = calculate_turn_duration(dist, img_width)
-            pyautogui.keyDown(turn_key)
-            time.sleep(duration)
-            pyautogui.keyUp(turn_key)
+            turn_end_time = now + duration
+            press_key(current_turn_key)
 
-    # Nitro
+    # End turn if time passed
+    if current_turn_key and now > turn_end_time:
+        release_key(current_turn_key)
+        current_turn_key = None
+
+    # --- Nitro logic ---
     if nitro_detected and (not target_x or abs(own_car_x_center - target_x) < TURN_DISTANCE * img_width * 2):
         pyautogui.press(NITRO_KEY)
 
-    # Forward
-    current_time = time.time()
-    if current_time - last_forward_time >= FORWARD_INTERVAL:
-        pyautogui.keyDown('up')
-        time.sleep(FORWARD_HOLD_TIME)
-        pyautogui.keyUp('up')
-        last_forward_time = current_time
+    # --- Forward motion logic ---
+    if now - last_forward_time >= FORWARD_INTERVAL:
+        press_key('up')
+        forward_end_time = now + FORWARD_HOLD_TIME
+        last_forward_time = now
 
-    time.sleep(0.05)
+    # End forward key if time passed
+    if 'up' in pressed_keys and now > forward_end_time:
+        release_key('up')
+
+    time.sleep(0.01)
