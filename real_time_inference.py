@@ -16,13 +16,13 @@ screen_width, screen_height = pyautogui.size()
 
 # Parameters
 TURN_DISTANCE = 0.10
-MIN_TURN_DURATION = 0.08
-MAX_TURN_DURATION = 0.65
+MIN_TURN_DURATION = 0.10
+MAX_TURN_DURATION = 0.8
 NITRO_KEY = 'n'
 OBSTACLE_AVOID_DISTANCE = 0.2
 ROAD_CENTER_WEIGHT = 0.7
-FORWARD_INTERVAL = 0.8
-FORWARD_HOLD_TIME = 0.7
+FORWARD_INTERVAL = 0.55
+FORWARD_HOLD_TIME = 0.55
 
 # Helper: screen capture
 def capture_screen():
@@ -53,12 +53,14 @@ def release_key(key):
 
 print("[INFO] Starting real-time inference. Press Ctrl+C to stop.")
 
-# Key timing
+# State variables
 last_forward_time = 0
 forward_end_time = 0
+is_moving_forward = False
 turn_end_time = 0
 current_turn_key = None
 
+# Main loop
 while True:
     now = time.time()
     img, img_width, img_height = capture_screen()
@@ -86,7 +88,7 @@ while True:
     if not own_car_x_center:
         continue
 
-    # Compute desired target X
+    # Compute target position
     target_x = None
     if road_centers:
         road_center = np.mean(road_centers)
@@ -99,7 +101,7 @@ while True:
                 target_x = (ROAD_CENTER_WEIGHT * road_center +
                             (1 - ROAD_CENTER_WEIGHT) * (obstacle_center + avoid_dir * img_width * 0.3))
 
-    # --- Steering logic ---
+    # --- Steering ---
     if target_x:
         dist = abs(own_car_x_center - target_x)
         if dist > TURN_DISTANCE * img_width and current_turn_key is None:
@@ -108,23 +110,24 @@ while True:
             turn_end_time = now + duration
             press_key(current_turn_key)
 
-    # End turn if time passed
+    # Stop turning if time passed
     if current_turn_key and now > turn_end_time:
         release_key(current_turn_key)
         current_turn_key = None
 
-    # --- Nitro logic ---
+    # --- Nitro ---
     if nitro_detected and (not target_x or abs(own_car_x_center - target_x) < TURN_DISTANCE * img_width * 2):
         pyautogui.press(NITRO_KEY)
 
-    # --- Forward motion logic ---
-    if now - last_forward_time >= FORWARD_INTERVAL:
+    # --- Forward movement ---
+    if not is_moving_forward and now - last_forward_time >= FORWARD_INTERVAL:
         press_key('up')
         forward_end_time = now + FORWARD_HOLD_TIME
         last_forward_time = now
+        is_moving_forward = True
 
-    # End forward key if time passed
-    if 'up' in pressed_keys and now > forward_end_time:
+    elif is_moving_forward and now >= forward_end_time:
         release_key('up')
+        is_moving_forward = False
 
     time.sleep(0.01)
