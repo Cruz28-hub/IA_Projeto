@@ -32,7 +32,7 @@ dataset = project.version(7).download("yolov8")
 
 # treinar o modelo
 # lista de modelos pre-treinados disponível em https://docs.ultralytics.com/models/yolov8/#performance-metrics
-model = YOLO("yolov8s.pt")  # carregar o modelo pre-treinado que se descarregou
+model = YOLO("yolov8m.pt")  # carregar o modelo pre-treinado que se descarregou
 
 # Treinar o modelo
-results = model.train(data='SuperTuxKart-7/data.yaml', epochs=100, imgsz=640, device='cpu')  # intel/window
+results = model.train(data='SuperTuxKart-7/data.yaml', epochs=100, imgsz=640, device='gpu')  # intel/window

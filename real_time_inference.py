@@ -16,13 +16,13 @@ screen_width, screen_height = pyautogui.size()
 
 # Parameters
 TURN_DISTANCE = 0.10
-MIN_TURN_DURATION = 0.10
-MAX_TURN_DURATION = 0.8
+MIN_TURN_DURATION = 0.05
+MAX_TURN_DURATION = 0.75
 NITRO_KEY = 'n'
 OBSTACLE_AVOID_DISTANCE = 0.2
 ROAD_CENTER_WEIGHT = 0.7
-FORWARD_INTERVAL = 0.55
-FORWARD_HOLD_TIME = 0.55
+FORWARD_INTERVAL = 0.8
+FORWARD_HOLD_TIME = 0.65
 
 # Helper: screen capture
 def capture_screen():
