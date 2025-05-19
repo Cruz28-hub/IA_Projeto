@@ -2,7 +2,6 @@ from IPython import display
 display.clear_output()
 
 import cv2
-import os
 import time
 import pyautogui
 import numpy as np
@@ -10,17 +9,20 @@ import mss
 from ultralytics import YOLO
 
 # Load model
-model = YOLO("C:/Users/joaoc/runs/detect/train14/weights/best.pt")
+model = YOLO("C:/Users/joaoc/runs/detect/train16/weights/best.pt")
 
 # Screen dimensions
 screen_width, screen_height = pyautogui.size()
 
 # Parameters
-TURN_DISTANCE = 0.15    # Percentage of screen width
-MIN_TURN_DURATION = 0.1
-MAX_TURN_DURATION = 0.5
+TURN_DISTANCE = 0.10
+MIN_TURN_DURATION = 0.08
+MAX_TURN_DURATION = 0.65
 NITRO_KEY = 'n'
-TURN_ANGLE_ZONE = 0.4   # For drift-based turn assistance
+OBSTACLE_AVOID_DISTANCE = 0.2
+ROAD_CENTER_WEIGHT = 0.7
+FORWARD_INTERVAL = 0.8
+FORWARD_HOLD_TIME = 0.7
 
 # Helper function
 def capture_screen():
@@ -28,82 +30,75 @@ def capture_screen():
         screenshot = sct.grab(sct.monitors[1])
         img = np.array(screenshot)
         img = cv2.cvtColor(img, cv2.COLOR_BGRA2BGR)
-        img = cv2.resize(img, (640, 480))  # Standardize input size
+        img = cv2.resize(img, (640, 480))
         return img, img.shape[1], img.shape[0]
 
 def calculate_turn_duration(distance, img_width):
-    normalized_dist = distance / img_width
-    return MAX_TURN_DURATION * (1 - normalized_dist) + MIN_TURN_DURATION
+    normalized_dist = min(1.0, distance / img_width)
+    return MIN_TURN_DURATION + (MAX_TURN_DURATION - MIN_TURN_DURATION) * normalized_dist
 
-# Initialize loop
-step = 0
+print("[INFO] Starting real-time inference. Press Ctrl+C to stop.")
 
-print("[INFO] Starting real-time inference. Press 'q' on image window to quit.")
+last_forward_time = time.time()
 
 while True:
     img, img_width, img_height = capture_screen()
-    results = model(img, conf=0.35)  # Try lower conf threshold
-    own_car_x_center = None
-    boundary_edges = []
-    class_names_detected = []
+    results = model(img, conf=0.35)
 
-    # Draw boxes and collect data
+    own_car_x_center = None
+    road_centers = []
+    obstacles = []
+    nitro_detected = False
+
     for box in results[0].boxes:
         x1, y1, x2, y2 = map(int, box.xyxy[0].tolist())
-        class_id = int(box.cls[0])
-        class_name = model.names[class_id]
-        class_names_detected.append(class_name)
+        class_name = model.names[int(box.cls[0])]
+        box_center = (x1 + x2) / 2
 
-        cv2.rectangle(img, (x1, y1), (x2, y2), (0, 255, 0), 2)
-        cv2.putText(img, class_name, (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
+        if class_name == "player_kart":
+            own_car_x_center = box_center
+        elif class_name == "road":
+            road_centers.append(box_center)
+        elif class_name in ["banana", "pumpkin"]:
+            obstacles.append((box_center, class_name))
+        elif class_name == "nitro":
+            nitro_detected = True
 
-        if class_name == "Own_Car":
-            own_car_x_center = (x1 + x2) / 2
-        elif class_name == "boundary":
-            boundary_edges.append((x1, x2))
+    if not own_car_x_center:
+        continue
 
-    turning = False
+    target_x = None
+    if road_centers:
+        road_center = np.mean(road_centers)
+        target_x = road_center
 
-    # --- Turning Logic ---
-    if own_car_x_center and boundary_edges:
-        closest_dist = float('inf')
-        turn_key = None
+        for obstacle_center, _ in obstacles:
+            obstacle_dist = abs(obstacle_center - own_car_x_center) / img_width
+            if obstacle_dist < OBSTACLE_AVOID_DISTANCE:
+                avoid_dir = 1 if road_center > obstacle_center else -1
+                target_x = (ROAD_CENTER_WEIGHT * road_center +
+                            (1 - ROAD_CENTER_WEIGHT) * (obstacle_center + avoid_dir * img_width * 0.3))
 
-        for (x1, x2) in boundary_edges:
-            boundary_center = (x1 + x2) / 2
-            dist = abs(own_car_x_center - boundary_center)
-
-            if dist < closest_dist:
-                closest_dist = dist
-                turn_key = 'left' if boundary_center > own_car_x_center else 'right'
-
-        if closest_dist < TURN_DISTANCE * img_width:
-            turn_duration = calculate_turn_duration(closest_dist, img_width)
+    # Steering
+    if target_x:
+        dist = abs(own_car_x_center - target_x)
+        if dist > TURN_DISTANCE * img_width:
+            turn_key = 'left' if target_x < own_car_x_center else 'right'
+            duration = calculate_turn_duration(dist, img_width)
             pyautogui.keyDown(turn_key)
-            time.sleep(turn_duration)
+            time.sleep(duration)
             pyautogui.keyUp(turn_key)
-            turning = True
 
-    # --- Steering Assist ---
-    if own_car_x_center:
-        if own_car_x_center < img_width * (0.5 - TURN_ANGLE_ZONE):
-            pyautogui.keyDown('right')
-            time.sleep(0.05)
-            pyautogui.keyUp('right')
-        elif own_car_x_center > img_width * (0.5 + TURN_ANGLE_ZONE):
-            pyautogui.keyDown('left')
-            time.sleep(0.05)
-            pyautogui.keyUp('left')
-
-    # --- Nitro Use ---
-    if not turning and "Nitro" in class_names_detected:
+    # Nitro
+    if nitro_detected and (not target_x or abs(own_car_x_center - target_x) < TURN_DISTANCE * img_width * 2):
         pyautogui.press(NITRO_KEY)
 
-    # --- Forward Movement ---
-    if step % 5 == 0:
+    # Forward
+    current_time = time.time()
+    if current_time - last_forward_time >= FORWARD_INTERVAL:
         pyautogui.keyDown('up')
-        time.sleep(0.05)
+        time.sleep(FORWARD_HOLD_TIME)
         pyautogui.keyUp('up')
+        last_forward_time = current_time
 
-    step += 1
-    time.sleep(0.05)  # Loop control
+    time.sleep(0.05)
