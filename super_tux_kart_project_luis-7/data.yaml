@@ -1,0 +1,18 @@
+names:
+- bonus
+- enemy_kart
+- nitro
+- obstacle
+- player_kart
+- power_up
+- track
+nc: 7
+roboflow:
+  license: CC BY 4.0
+  project: super_tux_kart_project_luis
+  url: https://universe.roboflow.com/supertuxkartluis/super_tux_kart_project_luis/dataset/7
+  version: 7
+  workspace: supertuxkartluis
+test: ../test/images
+train: ../train/images
+val: ../valid/images

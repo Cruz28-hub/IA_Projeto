@@ -1,94 +1,124 @@
-import time
-import os
+from IPython import display
+display.clear_output()
+
 import cv2
+import time
+import pyautogui
 import numpy as np
 import mss
-import pyautogui
 from ultralytics import YOLO
 
-# Mapeamento de teclas
-CONTROLS = {
-    'left': 'left',
-    'right': 'right',
-    'accelerate': 'up',
-    'brake': 'down',
-    'power_up': 'space',
-    'nitro': 'n',
-}
+# Load model
+model = YOLO("C:/Users/luiss/Documents/Estagio/IA_Projeto/runs/version_9/treino_versao_9/weights/best.pt")
 
-# Carregar o modelo treinado
-model = YOLO("runs/detect/train2/weights/best.pt")
-
-# Obter dimensões da tela
+# Screen dimensions
 screen_width, screen_height = pyautogui.size()
 
-# Função para capturar a tela
+# Parameters ajustados
+TURN_DISTANCE = 0.25  # Aumentado para começar a virar mais cedo
+MIN_TURN_DURATION = 0.2
+MAX_TURN_DURATION = 0.8
+NITRO_KEY = 'n'
+TURN_ANGLE_ZONE = 0.3
+ACCELERATION_DURATION = 1  # Tempo que mantém a aceleração pressionada
+
+# Helper functions
 def capture_screen():
     with mss.mss() as sct:
-        screenshot = sct.grab(sct.monitors[1])  # Captura do monitor principal
+        screenshot = sct.grab(sct.monitors[1])
         img = np.array(screenshot)
         img = cv2.cvtColor(img, cv2.COLOR_BGRA2BGR)
-        img_height, img_width, _ = img.shape
-        return img, img_width, img_height
+        img = cv2.resize(img, (640, 480))
+        return img, img.shape[1], img.shape[0]
 
-# Função para controlar o kart
-def control_kart(action, duration=0.1):
-    pyautogui.keyDown(CONTROLS[action])
-    time.sleep(duration)
-    pyautogui.keyUp(CONTROLS[action])
+def calculate_turn_duration(distance, img_width):
+    normalized_dist = distance / img_width
+    return MAX_TURN_DURATION * (1 - normalized_dist) + MIN_TURN_DURATION
 
-# Início do loop principal
-print("🎮 Iniciando controle automático do SuperTuxKart...")
-pyautogui.keyDown(CONTROLS['accelerate'])  # Aceleração constante
+# Initialize
+step = 0
+last_turn_time = time.time()
+pyautogui.keyDown('up')  # Mantém acelerador pressionado continuamente
 
-try:
-    while True:
-        img, img_width, img_height = capture_screen()
-        results = model(img)
+print("[INFO] Starting real-time inference. Press 'q' to quit.")
 
-        # Verificar se há detecções
-        if results and results[0].boxes:
-            for detection in results[0].boxes:
-                cls_id = int(detection.cls)
-                cls_name = model.names[cls_id]
-                x1, y1, x2, y2 = detection.xyxy[0]
-                x_center = (x1 + x2) / 2
+while True:
+    img, img_width, img_height = capture_screen()
+    results = model(img, conf=0.35)
+    own_car_x_center = None
+    track_edges = []
+    class_names_detected = []
 
-                if cls_name == 'enemy_kart':
-                    # Desviar do kart inimigo
-                    if x_center < img_width / 2:
-                        control_kart('left', 0.2)
-                    else:
-                        control_kart('right', 0.2)
+    # Process detections
+    for box in results[0].boxes:
+        x1, y1, x2, y2 = map(int, box.xyxy[0].tolist())
+        class_id = int(box.cls[0])
+        class_name = model.names[class_id]
+        class_names_detected.append(class_name)
 
-                elif cls_name == 'power_up':
-                    # Alinhar o kart com o power-up
-                    if x_center < img_width / 2 - 50:
-                        control_kart('left', 0.1)
-                    elif x_center > img_width / 2 + 50:
-                        control_kart('right', 0.1)
+        cv2.rectangle(img, (x1, y1), (x2, y2), (0, 255, 0), 2)
+        cv2.putText(img, class_name, (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
 
-                elif cls_name == 'bonus':
-                    # Alinhar o kart com o bónus
-                    if x_center < img_width / 2 - 50:
-                        control_kart('left', 0.1)
-                    elif x_center > img_width / 2 + 50:
-                        control_kart('right', 0.1)
-                    else:
-                        control_kart('power_up')
+        if class_name == "playerKart":
+            own_car_x_center = (x1 + x2) / 2
+        elif class_name == "track":
+            track_edges.append((x1, x2))
 
-                elif cls_name == 'nitro':
-                    # Alinhar o kart com o nitro
-                    if x_center < img_width / 2 - 50:
-                        control_kart('left', 0.1)
-                    elif x_center > img_width / 2 + 50:
-                        control_kart('right', 0.1)
-                    else:
-                        control_kart('nitro')
+    # --- Turning Logic ---
+    if own_car_x_center and track_edges:
+        left_boundary = min([x1 for (x1, x2) in track_edges])
+        right_boundary = max([x2 for (x1, x2) in track_edges])
+        track_width = right_boundary - left_boundary
+        
+        dist_to_left = own_car_x_center - left_boundary
+        dist_to_right = right_boundary - own_car_x_center
+        
+        # Virar mais agressivamente quando próximo das bordas
+        if dist_to_left < TURN_DISTANCE * track_width:
+            turn_duration = calculate_turn_duration(dist_to_left, track_width)
+            pyautogui.keyUp('left')  # Garante que não está pressionado
+            pyautogui.keyDown('right')
+            time.sleep(turn_duration)
+            pyautogui.keyUp('right')
+            last_turn_time = time.time()
+            
+        elif dist_to_right < TURN_DISTANCE * track_width:
+            turn_duration = calculate_turn_duration(dist_to_right, track_width)
+            pyautogui.keyUp('right')  # Garante que não está pressionado
+            pyautogui.keyDown('left')
+            time.sleep(turn_duration)
+            pyautogui.keyUp('left')
+            last_turn_time = time.time()
 
-        time.sleep(0.05)  # Reduzir o delay para melhor responsividade
+    # --- Center Positioning Assist ---
+    if own_car_x_center and track_edges:
+        track_center = (left_boundary + right_boundary) / 2
+        deviation = own_car_x_center - track_center
+        
+        # Correção mais suave mas contínua
+        if abs(deviation) > track_width * 0.15:
+            if deviation > 0 and time.time() - last_turn_time > 0.2:
+                pyautogui.keyDown('left')
+                time.sleep(0.1)
+                pyautogui.keyUp('left')
+                last_turn_time = time.time()
+            elif deviation < 0 and time.time() - last_turn_time > 0.2:
+                pyautogui.keyDown('right')
+                time.sleep(0.1)
+                pyautogui.keyUp('right')
+                last_turn_time = time.time()
 
-except KeyboardInterrupt:
-    print("🚨 Interrompido pelo usuário.")
-    pyautogui.keyUp(CONTROLS['accelerate'])  # Liberar a tecla de aceleração
-print("🏁 Controle automático encerrado.")
+    # --- Nitro Use ---
+    if "Nitro" in class_names_detected:
+        pyautogui.press(NITRO_KEY)
+
+    # Display
+    cv2.imshow('Screen Capture', img)
+    if cv2.waitKey(1) & 0xFF == ord('q'):
+        pyautogui.keyUp('up')  # Libera o acelerador ao sair
+        break
+
+    time.sleep(0.02)  # Loop mais rápido
+    step += 1
+
+cv2.destroyAllWindows()

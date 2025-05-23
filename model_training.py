@@ -29,5 +29,12 @@ rf = roboflow.Roboflow(api_key)
 # substituir nome do workspace e do projeto
 project = rf.workspace("supertuxkartluis").project("super_tux_kart_project_luis")
 # se versão do dataset > 1, substituir pela versão correspondente
-dataset = project.version(1).download("yolov8")
+dataset = project.version(9).download("yolov8")
 # WARN: necessário verificar os paths no ficheiro data.yaml, após este ser descarregado
+
+model = YOLO("yolov8s.pt")  # carregar o modelo pre-treinado que se descarregou
+
+# Treinar o modelo
+results = model.train(data='super_tux_kart_project_luis-8/data.yaml', epochs=50, imgsz=640, device='cpu',
+                       project='runs/version_8_50Epochs',  # intel/window
+    name='treino_versao_8_50Epochs',)  # intel/window
