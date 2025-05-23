@@ -35,4 +35,4 @@ dataset = project.version(7).download("yolov8")
 model = YOLO("yolov8m.pt")  # carregar o modelo pre-treinado que se descarregou
 
 # Treinar o modelo
-results = model.train(data='SuperTuxKart-7/data.yaml', epochs=100, imgsz=640, device='gpu')  # intel/window
+results = model.train(data='SuperTuxKart-7/data.yaml', epochs=75, imgsz=640, device='cpu')  # intel/window

@@ -9,7 +9,7 @@ import mss
 from ultralytics import YOLO
 
 # Load model
-model = YOLO("C:/Users/joaoc/runs/detect/train16/weights/best.pt")
+model = YOLO("C:/Users/joaoc/runs/detect/train21/weights/best.pt")
 
 # Screen dimensions
 screen_width, screen_height = pyautogui.size()
