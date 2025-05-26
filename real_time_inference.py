@@ -8,117 +8,113 @@ import numpy as np
 import mss
 from ultralytics import YOLO
 
-# Load model
-model = YOLO("C:/Users/luiss/Documents/Estagio/IA_Projeto/runs/version_9/treino_versao_9/weights/best.pt")
+# 1. Carregar modelo YOLO treinado
+model = YOLO("C:/Users/luiss/Documents/Estagio/IA_Projeto/runs/version_8_50Epochs/treino_versao_8_50Epochs/weights/best.pt")
+print("Classes do modelo carregado:")
+print(model.names)
 
-# Screen dimensions
-screen_width, screen_height = pyautogui.size()
-
-# Parameters ajustados
-TURN_DISTANCE = 0.25  # Aumentado para começar a virar mais cedo
-MIN_TURN_DURATION = 0.2
-MAX_TURN_DURATION = 0.8
+# 2. Parâmetros ajustáveis
+TURN_DISTANCE = 0.25
+MIN_TURN_DURATION = 0.1
+MAX_TURN_DURATION = 0.6
 NITRO_KEY = 'n'
-TURN_ANGLE_ZONE = 0.3
-ACCELERATION_DURATION = 1  # Tempo que mantém a aceleração pressionada
+CONFIDENCE_THRESHOLD = 0.45
 
-# Helper functions
+# 3. Função para capturar tela
 def capture_screen():
     with mss.mss() as sct:
-        screenshot = sct.grab(sct.monitors[1])
+        monitor = sct.monitors[1]
+        screenshot = sct.grab(monitor)
         img = np.array(screenshot)
         img = cv2.cvtColor(img, cv2.COLOR_BGRA2BGR)
         img = cv2.resize(img, (640, 480))
         return img, img.shape[1], img.shape[0]
 
-def calculate_turn_duration(distance, img_width):
-    normalized_dist = distance / img_width
-    return MAX_TURN_DURATION * (1 - normalized_dist) + MIN_TURN_DURATION
+# 4. Função para calcular tempo de viragem
+def calculate_turn(distance, max_width):
+    ratio = min(distance / max_width, 1.0)
+    return MIN_TURN_DURATION + (MAX_TURN_DURATION - MIN_TURN_DURATION) * ratio
 
-# Initialize
-step = 0
+# 5. Delay para o usuário abrir o jogo
+print("[SISTEMA] Iniciando em 3 segundos...")
+time.sleep(3)
+
 last_turn_time = time.time()
-pyautogui.keyDown('up')  # Mantém acelerador pressionado continuamente
-
-print("[INFO] Starting real-time inference. Press 'q' to quit.")
+print("[SISTEMA] Controle automático iniciado. Pressione 'Q' para sair.")
 
 while True:
-    img, img_width, img_height = capture_screen()
-    results = model(img, conf=0.35)
-    own_car_x_center = None
-    track_edges = []
-    class_names_detected = []
+    frame, width, height = capture_screen()
+    results = model(frame, conf=CONFIDENCE_THRESHOLD, verbose=False)
 
-    # Process detections
+    kart_pos = None
+    left_bound = float('inf')
+    right_bound = -float('inf')
+    nitro_detected = False
+
+    print(">> Objetos detectados no frame:")
     for box in results[0].boxes:
         x1, y1, x2, y2 = map(int, box.xyxy[0].tolist())
-        class_id = int(box.cls[0])
-        class_name = model.names[class_id]
-        class_names_detected.append(class_name)
+        class_name = model.names[int(box.cls[0])]
+        print(f" - {class_name}")
 
-        cv2.rectangle(img, (x1, y1), (x2, y2), (0, 255, 0), 2)
-        cv2.putText(img, class_name, (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
+        if class_name == "player_kart":
+            kart_pos = (x1 + x2) // 2
+            cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 255), 2)
 
-        if class_name == "playerKart":
-            own_car_x_center = (x1 + x2) / 2
         elif class_name == "track":
-            track_edges.append((x1, x2))
+            left_bound = min(left_bound, x1)
+            right_bound = max(right_bound, x2)
+            cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 0, 255), 1)
 
-    # --- Turning Logic ---
-    if own_car_x_center and track_edges:
-        left_boundary = min([x1 for (x1, x2) in track_edges])
-        right_boundary = max([x2 for (x1, x2) in track_edges])
-        track_width = right_boundary - left_boundary
-        
-        dist_to_left = own_car_x_center - left_boundary
-        dist_to_right = right_boundary - own_car_x_center
-        
-        # Virar mais agressivamente quando próximo das bordas
-        if dist_to_left < TURN_DISTANCE * track_width:
-            turn_duration = calculate_turn_duration(dist_to_left, track_width)
-            pyautogui.keyUp('left')  # Garante que não está pressionado
-            pyautogui.keyDown('right')
+        elif class_name == "nitro":
+            nitro_detected = True
+            cv2.rectangle(frame, (x1, y1), (x2, y2), (255, 0, 0), 2)
+
+    # Verificação segura
+    if kart_pos is not None and left_bound < right_bound:
+        pyautogui.keyDown('up')  # Só acelera se tudo estiver detectado
+        track_width = right_bound - left_bound
+        dist_left = (kart_pos - left_bound) / track_width
+        dist_right = (right_bound - kart_pos) / track_width
+
+        if nitro_detected:
+            pyautogui.press(NITRO_KEY)
+            print(">> NITRO ativado!")
+            cv2.putText(frame, "NITRO ATIVADO!", (width//2-100, 50), 
+                       cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 0, 255), 2)
+
+        turn_direction = None
+        if dist_left < TURN_DISTANCE:
+            turn_direction = 'right'
+            turn_duration = calculate_turn(kart_pos - left_bound, track_width)
+        elif dist_right < TURN_DISTANCE:
+            turn_direction = 'left'
+            turn_duration = calculate_turn(right_bound - kart_pos, track_width)
+
+        if turn_direction and (time.time() - last_turn_time > 0.2):
+            print(f">> Virando para {turn_direction.upper()} por {turn_duration:.2f}s")
+            pyautogui.keyDown(turn_direction)
             time.sleep(turn_duration)
-            pyautogui.keyUp('right')
-            last_turn_time = time.time()
-            
-        elif dist_to_right < TURN_DISTANCE * track_width:
-            turn_duration = calculate_turn_duration(dist_to_right, track_width)
-            pyautogui.keyUp('right')  # Garante que não está pressionado
-            pyautogui.keyDown('left')
-            time.sleep(turn_duration)
-            pyautogui.keyUp('left')
+            pyautogui.keyUp(turn_direction)
             last_turn_time = time.time()
 
-    # --- Center Positioning Assist ---
-    if own_car_x_center and track_edges:
-        track_center = (left_boundary + right_boundary) / 2
-        deviation = own_car_x_center - track_center
-        
-        # Correção mais suave mas contínua
-        if abs(deviation) > track_width * 0.15:
-            if deviation > 0 and time.time() - last_turn_time > 0.2:
-                pyautogui.keyDown('left')
-                time.sleep(0.1)
-                pyautogui.keyUp('left')
-                last_turn_time = time.time()
-            elif deviation < 0 and time.time() - last_turn_time > 0.2:
-                pyautogui.keyDown('right')
-                time.sleep(0.1)
-                pyautogui.keyUp('right')
-                last_turn_time = time.time()
+            cv2.putText(frame, f"VIRANDO {turn_direction.upper()}!", 
+                        (width//2-80, height-50), cv2.FONT_HERSHEY_SIMPLEX, 
+                        0.6, (0, 255, 0), 2)
+    else:
+        pyautogui.keyUp('up')  # Não acelera se não estiver tudo certo
 
-    # --- Nitro Use ---
-    if "Nitro" in class_names_detected:
-        pyautogui.press(NITRO_KEY)
+    # Debug visual
+    cv2.putText(frame, f"Kart Position: {kart_pos if kart_pos is not None else 'N/D'}", 
+                (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 0), 2)
+    cv2.putText(frame, f"Track Bounds: L={left_bound} | R={right_bound}", 
+                (10, 60), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 0), 2)
 
-    # Display
-    cv2.imshow('Screen Capture', img)
+    cv2.imshow('Controle Automático', frame)
+
     if cv2.waitKey(1) & 0xFF == ord('q'):
-        pyautogui.keyUp('up')  # Libera o acelerador ao sair
+        pyautogui.keyUp('up')
         break
 
-    time.sleep(0.02)  # Loop mais rápido
-    step += 1
-
 cv2.destroyAllWindows()
+print("[SISTEMA] Controle desativado.")
