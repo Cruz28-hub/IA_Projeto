@@ -1,5 +1,7 @@
 .env
 SuperTuxKart-7
 runs
+runs\version_1
+runs\version_8
+runs\version_8_50Epochs
 detections
-yolov8s.pt
